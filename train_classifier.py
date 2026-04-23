@@ -13,13 +13,14 @@ import pandas as pd
 
 # --- CONFIGURATION ---
 BATCH_SIZE = 32
-IMG_SIZE = (224, 224)
-EPOCHS = 5
+IMG_SIZE = (224,224)
+EPOCHS = 20
 
 # 1. Setup Paths
 base_dir = 'dataset'
 image_dir = os.path.join(base_dir, 'images')
-csv_path = os.path.join(base_dir, 'HAM10000_metadata.csv')
+csv_path = 'dataset/HAM10000_metadata.csv'
+
 
 print("Loading Data Information...")
 df = pd.read_csv(csv_path)
@@ -28,9 +29,9 @@ df = pd.read_csv(csv_path)
 df['path'] = df['image'] + '.jpg' 
 label_columns = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
 
-# 3. Create Generators
+# 3. Create Generators (Standard Scaling)
 datagen = ImageDataGenerator(
-    rescale=1./255,
+    rescale=1./255,       # Using standard scaling
     rotation_range=20,
     horizontal_flip=True,
     validation_split=0.2
@@ -63,7 +64,9 @@ val_generator = datagen.flow_from_dataframe(
 # 4. Build Model
 print("Downloading the AI Brain...")
 base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-base_model.trainable = False
+
+# --- THIS IS THE CRITICAL CHANGE ---
+base_model.trainable = True  # Unfreezing so it can learn Skin Cancer specifically
 
 model = models.Sequential([
     base_model,
@@ -73,9 +76,11 @@ model = models.Sequential([
     layers.Dense(7, activation='softmax')
 ])
 
-model.compile(optimizer='adam', 
-              loss='categorical_crossentropy', 
+# Using a lower learning rate (1e-4) because the model is unfrozen
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+              loss='categorical_crossentropy',
               metrics=['accuracy'])
+
 
 # 5. Train
 print(f"Starting Training for {EPOCHS} Epochs...")

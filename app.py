@@ -11,6 +11,10 @@ import numpy as np
 from PIL import Image
 import tensorflow as tf
 
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from PIL import ImageOps  # Make sure this is imported too
+
+
 # --- 3. DISABLE GPU (PREVENTS CRASH) ---
 try:
     tf.config.set_visible_devices([], 'GPU')
@@ -32,12 +36,32 @@ def get_model():
     model = tf.keras.models.load_model('models/skin_cancer_model.h5')
     return model
 
+import numpy as np
+from PIL import Image, ImageOps
+
+def import_and_predict(image_data, model):
+    # 1. Resize to 224x224
+    size = (224, 224)
+    image = ImageOps.fit(image_data, size, Image.Resampling.LANCZOS)
+    
+    # 2. Convert to Array
+    img_array = np.asarray(image)
+    
+    # 3. NORMALIZE (Critical: Matches the training rescale=1./255)
+    img_array = img_array / 255.0  
+    
+    # 4. Predict
+    img_reshape = img_array[np.newaxis, ...]
+    prediction = model.predict(img_reshape)
+    
+    return prediction
+
+
+
 # Trigger load now
 model = get_model()
 
-# --------------------------------------------------------
-# --- PASTE THIS AT THE BOTTOM OF APP.PY (REPLACING MAIN APP) ---
-# --------------------------------------------------------
+
 
 # --- PAGE CONFIG (Must be the first Streamlit command) ---
 st.set_page_config(
@@ -112,45 +136,89 @@ with col2:
     st.info("🧠 **Step 2: AI Analysis**")
     
     if uploaded_file is not None:
-        # Add a big "Analyze" button
-        if st.button('🔍 Run AI Diagnosis'):
+        
+        # 1. DEFINE DATA FIRST (Safe to exist before button click)
+        class_names = ['Benign', 'Carcinoma', 'Dermatofibroma', 'Keratoses', 'Melanoma', 'Nevi', 'Vascular']
+        
+        medical_info = {
+            'Benign': {
+                'description': 'A non-cancerous benign keratosis or similar epidermal growth. These lesions are typically localized and do not spread to other tissues.',
+                'risk': '🟢 Low Risk (Benign)',
+                'advice': 'No immediate medical intervention is required. However, continue routine self-examinations and consult a dermatologist if the lesion begins to bleed, itch, or change rapidly.'
+            },
+            'Carcinoma': {
+                'description': 'A malignant neoplasm of the skin, most commonly Basal Cell Carcinoma (BCC) or Squamous Cell Carcinoma (SCC). Often linked to cumulative UV/sun exposure.',
+                'risk': '🔴 High Risk (Malignant)',
+                'advice': 'Requires prompt medical evaluation. A dermatologist should perform a clinical assessment and biopsy to confirm the diagnosis and determine appropriate surgical treatment.'
+            },
+            'Dermatofibroma': {
+                'description': 'A benign, slow-growing dermal nodule composed of fibrous tissue. It often feels like a firm lump under the skin and may develop after minor trauma (e.g., a bug bite).',
+                'risk': '🟢 Low Risk (Benign)',
+                'advice': 'Generally asymptomatic and requires no medical treatment. Excision is only recommended if the lesion becomes painful, continually irritated, or cosmetically concerning.'
+            },
+            'Keratoses': {
+                'description': 'Actinic keratoses are rough, scaly patches caused by chronic UV damage. They are considered precancerous and carry a risk of progressing to Squamous Cell Carcinoma.',
+                'risk': '🟡 Moderate Risk (Pre-cancerous)',
+                'advice': 'Schedule a dermatological consultation. Proactive treatments, such as cryotherapy or topical immunomodulators, are often recommended to prevent malignant progression.'
+            },
+            'Melanoma': {
+                'description': 'An aggressive and potentially life-threatening malignant tumor originating from melanocytes (pigment-producing cells). Early detection and intervention are critical.',
+                'risk': '🚨 Critical Risk (Malignant)',
+                'advice': 'URGENT MEDICAL ATTENTION REQUIRED. Seek immediate evaluation by a dermatologist or oncologist for an urgent biopsy and comprehensive treatment planning.'
+            },
+            'Nevi': {
+                'description': 'A benign proliferation of melanocytes, commonly known as a mole. They typically present as uniform, well-defined brown or pink macules or papules.',
+                'risk': '🟢 Low Risk (Benign)',
+                'advice': 'Standard observation is recommended. Perform monthly skin checks using the ABCDE criteria (Asymmetry, Border, Color, Diameter, Evolving) and report any deviations to a doctor.'
+            },
+            'Vascular': {
+                'description': 'A benign vascular anomaly resulting from an overgrowth or clustering of blood vessels. Common presentations include cherry angiomas or angiokeratomas.',
+                'risk': '🟢 Low Risk (Benign)',
+                'advice': 'Completely harmless and requires no intervention. If the lesion is frequently traumatized and bleeds, a dermatologist can easily treat it via laser therapy or electrocautery.'
+            }
+        }
+
+        # 2. THE BUTTON LOGIC
+        if st.button('Run AI Diagnosis'):
             
             with st.spinner('Scanning lesion features...'):
-                # Preprocessing
-                img = image.resize((224, 224))
-                img_array = np.array(img)
-                img_array = np.expand_dims(img_array, axis=0) / 255.0
-                
-                # Prediction
-                predictions = model(img_array, training=False).numpy()
-                
-                # Softmax
-                def softmax(x):
-                    e_x = np.exp(x - np.max(x))
-                    return e_x / e_x.sum()
-                
-                score = softmax(predictions[0])
+                # Calculate scores
+                prediction = import_and_predict(image, model)
+                score = prediction[0]
                 confidence = np.max(score) * 100
                 
-                class_names = ['Melanoma', 'Nevi', 'Carcinoma', 'Keratoses', 'Benign', 'Dermatofibroma', 'Vascular']
-                predicted_class = class_names[np.argmax(score)]
-
-            # --- SHOW RESULTS (Dashboard Style) ---
+                # Get the specific class
+                predicted_class_index = np.argmax(score)
+                predicted_class = class_names[predicted_class_index]
+            
+            # 3. SHOW RESULTS (Notice how this is indented under 'if st.button'!)
             st.success(f"### Diagnosis: **{predicted_class}**")
             
-            # Confidence Meter
-            if confidence > 70:
-                st.metric(label="Confidence Score", value=f"{confidence:.2f}%", delta="High Certainty")
-            elif confidence > 40:
-                st.metric(label="Confidence Score", value=f"{confidence:.2f}%", delta="Moderate", delta_color="off")
-            else:
-                st.metric(label="Confidence Score", value=f"{confidence:.2f}%", delta="Low/Unsure", delta_color="inverse")
-
-            # Bar Chart
+            info = medical_info[predicted_class]
+            st.markdown(f"**Risk Level:** {info['risk']}")
+            st.write(f"**What is it?** {info['description']}")
+            st.info(f"**Recommendation:** {info['advice']}")
+            
             st.write("---")
-            st.write("**Detailed Probability Distribution:**")
-            st.bar_chart(dict(zip(class_names, score)))
-
+            
+            # 4. SHOW METRICS & CHARTS
+            if confidence > 70:
+                st.metric(label="Confidence Level", value=f"{confidence:.2f}%", delta="High Certainty")
+            elif confidence > 40:
+                st.metric(label="Confidence Level", value=f"{confidence:.2f}%", delta="Moderate", delta_color="off")
+            else:
+                st.metric(label="Confidence Level", value=f"{confidence:.2f}%", delta="Low/Unsure", delta_color="inverse")
+                
+            st.write("---")
+            st.write("### Detailed Probability Distribution:")
+            
+            import pandas as pd
+            chart_data = pd.DataFrame(
+                {"Probability": score},
+                index=class_names
+            )
+            st.bar_chart(chart_data)
+            
     else:
         # Placeholder when no image is uploaded
-        st.write("👈 *Please upload an image on the left to begin analysis.*")
+        st.write("👉 Please upload an image on the left to begin analysis.")
